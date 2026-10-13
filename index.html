@@ -255,7 +255,7 @@ function history(){
 function adminPage(){
  const rounds=[...state.rounds].sort((a,b)=>b.round_number-a.round_number);
  return nav()+`<div class="grid"><div class="card"><h2>⚙️ Nueva jornada</h2><div class="formgrid"><div><label>Nº jornada</label><input id="nr" type="number" min="1"></div><div><label>Nombre</label><input id="nn" placeholder="Jornada 1"></div><div><label>Cierre</label><input id="nc" type="datetime-local"></div></div><p class="small muted">Puedes dejar el cierre vacío: se calculará automáticamente como 1 hora antes del primer partido.</p><div id="newmatches">${adminMatchRows()}</div><div style="margin-top:12px"><button class="btn blue" onclick="importFile()">📥 Importar CSV/JSON</button> <input id="file" type="file" accept=".csv,.json" class="hidden" onchange="readImport(event)"></div><button class="btn primary" style="margin-top:12px" onclick="createRound()">💾 Crear jornada</button></div>
- <div class="card"><h2>📚 Jornadas</h2>${rounds.map(r=>`<div class="stat" style="margin-bottom:9px"><b>${esc(r.name)}</b><span class="badge ${r.status}">${r.status}</span><div class="small muted">Cierre ${dateFmt(r.closes_at)}</div><button class="btn" style="margin-top:8px" onclick="openAdminRound(${r.id})">Gestionar</button> <button class="btn blue" style="margin-top:8px" onclick="openAdminTracking(${r.id})">👥 Seguimiento</button></div>`).join("")||`<p class="muted">No hay jornadas.</p>`}</div></div>
+ <div class="card"><h2>📚 Jornadas</h2>${rounds.map(r=>`<div class="stat" style="margin-bottom:9px"><b>${esc(r.name)}</b><span class="badge ${r.status}">${r.status}</span><div class="small muted">Cierre ${dateFmt(r.closes_at)}</div><button class="btn" style="margin-top:8px" onclick="openAdminRound(${r.id})">Gestionar</button> <button class="btn blue" style="margin-top:8px" onclick="openAdminTracking(${r.id})">👥 Seguimiento</button> <button class="btn danger" style="margin-top:8px" onclick="deleteRound(${r.id})">🗑️ Eliminar</button></div>`).join("")||`<p class="muted">No hay jornadas.</p>`}</div></div>
  ${state.adminRound?adminManage(state.adminRound):""}
  ${state.adminTrackingRound?adminTracking(state.adminTrackingRound):""}`
 }
@@ -269,6 +269,31 @@ async function createRound(){
  let q=await sb.from("quinielon_rounds").insert({season_id:state.season.id,round_number:num,name,status:"draft",closes_at:close,first_match_at:first.kickoff_at,created_by:state.user.id}).select().single();if(q.error){toast(q.error.message);return}
  const rows=matches.map((m,i)=>({...m,round_id:q.data.id,match_order:i+1}));let z=await sb.from("quinielon_matches").insert(rows);if(z.error){toast(z.error.message);return}
  toast("Jornada creada como borrador.");state.adminRound=q.data.id;await load()
+}
+async function deleteRound(rid){
+ if(!admin()){toast("Solo el administrador puede eliminar jornadas.");return}
+ const r=state.rounds.find(x=>Number(x.id)===Number(rid));
+ if(!r){toast("No se encuentra la jornada.");return}
+ const matches=roundMatches(rid);
+ if(!window.confirm(`Vas a eliminar "${r.name}" y sus ${matches.length} partidos. También se borrarán los pronósticos y puntuaciones asociados. Esta acción no se puede deshacer.\\n\\n¿Quieres continuar?`))return;
+ const typed=window.prompt(`Para confirmar, escribe ELIMINAR ${r.name}`);
+ if(typed!==`ELIMINAR ${r.name}`){toast("Eliminación cancelada.");return}
+ try{
+  let q=await sb.from("quinielon_scores").delete().eq("round_id",rid);
+  if(q.error)throw q.error;
+  const matchIds=matches.map(m=>m.id);
+  if(matchIds.length){
+   q=await sb.from("quinielon_predictions").delete().in("match_id",matchIds);
+   if(q.error)throw q.error;
+   q=await sb.from("quinielon_matches").delete().eq("round_id",rid);
+   if(q.error)throw q.error;
+  }
+  q=await sb.from("quinielon_rounds").delete().eq("id",rid);
+  if(q.error)throw q.error;
+  state.adminRound=null;state.adminTrackingRound=null;
+  toast("Jornada eliminada correctamente.");
+  await load();
+ }catch(err){toast("No se ha podido eliminar la jornada: "+(err.message||"error desconocido"))}
 }
 function adminManage(rid){
  const r=state.rounds.find(x=>Number(x.id)===Number(rid)),ms=roundMatches(rid);if(!r)return "";
