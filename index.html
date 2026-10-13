@@ -173,7 +173,7 @@ body:before{opacity:.13}
 const SUPABASE_URL="https://kprkwwfweuqfghgemkml.supabase.co";
 const SUPABASE_KEY="sb_publishable_rmQwmKN3a2T50VD7fpBqhg_5Fd8pNvV";
 const sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
-const state={user:null,profile:null,participant:null,season:null,settings:null,rounds:[],matches:[],predictions:[],scores:[],participants:[],page:"home",adminRound:null,adminTrackingRound:null};
+const state={user:null,profile:null,participant:null,season:null,settings:null,rounds:[],matches:[],predictions:[],scores:[],participants:[],page:"home",adminRound:null,adminTrackingRound:null,jackpotState:null,jackpotEvents:[]};
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??"").replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]));
 const money=n=>new Intl.NumberFormat("es-ES").format(Number(n||0))+" €";
@@ -186,6 +186,12 @@ function roundMatches(rid){return state.matches.filter(m=>Number(m.round_id)===N
 function resultOutcome(h,a){if(h==null||a==null)return null;return Number(h)>Number(a)?"1":Number(h)<Number(a)?"2":"X"}
 function predFor(mid){return state.predictions.find(p=>Number(p.match_id)===Number(mid)&&Number(p.participant_id)===Number(state.participant?.id))}
 function scoreRound(rid){return state.scores.find(s=>Number(s.round_id)===Number(rid)&&Number(s.participant_id)===Number(state.participant?.id))}
+function roundClosed(r){return !!r&&r.status!=="draft"&&(r.status==="finished"||new Date(r.closes_at)<=new Date())}
+function roundStatusLabel(r){if(r.status==="finished")return "Finalizada";if(r.status==="draft")return "Borrador";return roundClosed(r)?"En juego":"Abierta"}
+function roundStatusClass(r){if(r.status==="finished")return "closed";if(r.status==="draft")return "draft";return roundClosed(r)?"closed":"open"}
+function currentJackpot(){return Number(state.jackpotState?.balance||0)}
+function prizeSettings(){return {prize_1x2:Number(state.settings?.prize_1x2??100000),prize_exact:Number(state.settings?.prize_exact??250000),prize_full:Number(state.settings?.prize_full??1000000),jackpot_per_round:100000,prize_superjackpot:10000000}}
+function prizeSummary(){const z=prizeSettings();return `<div class="card"><h2>💰 Bote y premios</h2><div class="grid3"><div class="stat"><span>Por cada 1X2 acertado</span><b>${money(z.prize_1x2)}</b></div><div class="stat"><span>Por marcador exacto</span><b>${money(z.prize_exact)}</b></div><div class="stat"><span>Pleno al 6 (1X2)</span><b>${money(z.prize_full)}</b></div><div class="stat"><span>🎰 Bote acumulado</span><b>${money(currentJackpot())}</b><small class="muted">+100.000 € por jornada sin pleno</small></div><div class="stat"><span>🚀 SUPERJACKPOT LFC</span><b>${money(z.prize_superjackpot)}</b><small class="muted">Por acertar los 6 marcadores exactos</small></div></div><p class="small muted">Los premios por aciertos y el SUPERJACKPOT son acumulables. Si hay varios plenos al 6 en una jornada, el bote se reparte entre ellos.</p></div>`}
 async function load(){
  const {data:{user}}=await sb.auth.getUser(); state.user=user;
  if(!user){render();return}
@@ -201,7 +207,15 @@ async function load(){
  ]);
  for(const x of [ss,rs,ms,ps,sc,parts])if(x.error)throw x.error;
  state.season=ss.data;state.rounds=rs.data||[];state.matches=ms.data||[];state.predictions=ps.data||[];state.scores=sc.data||[];state.participants=parts.data||[];
- if(state.season){let st=await sb.from("quinielon_settings").select("*").eq("season_id",state.season.id).maybeSingle();state.settings=st.data}
+ if(state.season){
+  let st=await sb.from("quinielon_settings").select("*").eq("season_id",state.season.id).maybeSingle();state.settings=st.data;
+  const [js,jr]=await Promise.all([
+   sb.from("quinielon_jackpot_state").select("*").eq("season_id",state.season.id).maybeSingle(),
+   sb.from("quinielon_jackpot_rounds").select("*").eq("season_id",state.season.id)
+  ]);
+  if(js.error)throw js.error;if(jr.error)throw jr.error;
+  state.jackpotState=js.data;state.jackpotEvents=jr.data||[];
+ }else{state.jackpotState=null;state.jackpotEvents=[]}
  render();
 }
 function nav(){
@@ -226,10 +240,15 @@ async function loginUser(){const team=$("team").value,pass=$("pass").value;$("lo
 async function loginAdmin(){const email=$("adminemail").value.trim(),password=$("adminpass").value;$("adminerr").textContent="";if(!email||!password){$("adminerr").textContent="Introduce el correo y la contraseña de administrador.";return}const {error}=await sb.auth.signInWithPassword({email,password});if(error){$("adminerr").textContent="No se ha podido iniciar sesión. Comprueba el correo y la contraseña.";return}try{await load();if(!admin()){await sb.auth.signOut();state.user=null;state.profile=null;render();const e=$("adminerr");if(e)e.textContent="Esta cuenta no tiene permisos de administrador."}}catch(e){await sb.auth.signOut();const el=$("adminerr");if(el)el.textContent=e.message}}
 async function logout(){await sb.auth.signOut();location.reload()}
 function home(){
- const r=currentRound();if(!r)return nav()+`<div class="card home-hero"><span class="badge draft">PRÓXIMAMENTE</span><h2>Prepara los pronósticos</h2><p class="muted">El administrador publicará la próxima jornada en breve.</p></div>`;
+ const r=currentRound();if(!r)return nav()+`<div class="card home-hero"><span class="badge draft">PRÓXIMAMENTE</span><h2>Prepara los pronósticos</h2><p class="muted">El administrador publicará la próxima jornada en breve.</p></div>${prizeSummary()}`;
  const ms=roundMatches(r.id),s=scoreRound(r.id),closed=new Date(r.closes_at)<=new Date(),predCount=ms.filter(m=>!!predFor(m.id)).length;
  return nav()+`<section class="card home-hero"><div class="home-hero-top"><div><span class="badge ${closed?"closed":"open"}">${closed?"🔒 CERRADA":"● JORNADA ABIERTA"}</span><h2>${esc(r.name)}</h2><div class="home-subtitle">${ms.length} partidos · Cierre ${dateFmt(r.closes_at)}</div></div>${s?`<div class="home-prize"><div><span class="small muted">Premio de la jornada</span><b>${money(s.prize)}</b></div><span class="badge open">Calculado</span></div>`:`<div class="home-prize"><div><span class="small muted">Tu premio actual</span><b>— €</b></div><span class="small muted">Aún por calcular</span></div>`}</div><div class="home-metrics"><div class="home-metric"><strong>${predCount}/${ms.length}</strong><span>Pronósticos guardados</span></div><div class="home-metric"><strong>${s?`${s.correct_1x2}/6`:`—/6`}</strong><span>Aciertos 1X2</span></div><div class="home-metric"><strong>${s?`${s.exact_scores}`:"—"}</strong><span>Marcadores exactos</span></div></div></section>
- <section class="card prediction-card"><div class="prediction-heading"><h3>🎯 Tus pronósticos</h3><span class="badge">${ms.length} PARTIDOS</span></div><p class="muted small" style="margin:0 0 8px">Elige 1, X o 2 y añade el marcador exacto. Recuerda guardar antes del cierre.</p>${ms.map(matchHtml).join("")}<div class="save-bar">${closed?`<div class="muted small center">🔒 Los pronósticos están cerrados.</div>`:`<button class="btn primary" onclick="savePredictions(${r.id})">💾 Guardar mis pronósticos</button>`}</div></section>`
+ <section class="card prediction-card"><div class="prediction-heading"><h3>🎯 Tus pronósticos</h3><span class="badge">${ms.length} PARTIDOS</span></div><p class="muted small" style="margin:0 0 8px">Elige 1, X o 2 y añade el marcador exacto. Recuerda guardar antes del cierre.</p>${ms.map(matchHtml).join("")}<div class="save-bar">${closed?`<div class="muted small center">🔒 Los pronósticos están cerrados.</div>`:`<button class="btn primary" onclick="savePredictions(${r.id})">💾 Guardar mis pronósticos</button>`}</div></section>${closed?sharedPredictionsHtml(r.id):""}${prizeSummary()}`
+}
+function sharedPredictionsHtml(rid){
+ const r=state.rounds.find(x=>Number(x.id)===Number(rid));if(!r||!roundClosed(r))return "";
+ const ms=roundMatches(rid);const participants=state.participants.filter(p=>Number(p.id)!==Number(state.participant?.id));
+ return `<section class="card"><h2>👀 Pronósticos de los participantes</h2><p class="muted small">El plazo ha terminado. Ya puedes consultar las predicciones de todos los equipos.</p><div class="tablewrap"><table class="table"><thead><tr><th>Equipo</th>${ms.map(m=>`<th>${esc(m.home_team)} - ${esc(m.away_team)}</th>`).join("")}</tr></thead><tbody>${[state.participant,...participants].filter(Boolean).map(p=>`<tr class="${Number(p.id)===Number(state.participant?.id)?"me":""}"><td><b>${esc(p.team_name||p.name||"Equipo")}</b></td>${ms.map(m=>{const pr=state.predictions.find(x=>Number(x.participant_id)===Number(p.id)&&Number(x.match_id)===Number(m.id));return `<td>${pr?`<b>${esc(pr.outcome||"—")}</b><br><span class="small muted">${pr.home_goals??"–"} - ${pr.away_goals??"–"}</span>`:`<span class="muted">—</span>`}`}).join("")}</tr>`).join("")}</tbody></table></div></section>`
 }
 function matchHtml(m){
  const p=predFor(m.id),locked=new Date(currentRound().closes_at)<=new Date();
@@ -245,17 +264,18 @@ async function savePredictions(rid){
 }
 function ranking(){
  const rows=state.participants.map(p=>{const ss=state.scores.filter(s=>Number(s.participant_id)===Number(p.id));return {...p,total:ss.reduce((a,s)=>a+Number(s.prize||0),0),one:ss.reduce((a,s)=>a+Number(s.correct_1x2||0),0),exact:ss.reduce((a,s)=>a+Number(s.exact_scores||0),0),full:ss.filter(s=>s.full_bonus).length}}).sort((a,b)=>b.total-a.total);
- return nav()+`<div class="card"><h2>🏆 Clasificación general</h2><div class="tablewrap"><table class="table"><thead><tr><th>#</th><th>Equipo</th><th>€</th><th>1X2</th><th>Exactos</th><th>6/6</th></tr></thead><tbody>${rows.map((x,i)=>`<tr class="${Number(x.id)===Number(state.participant?.id)?"me":""}"><td>${i+1}</td><td><b>${esc(x.team_name||x.name||"Equipo")}</b></td><td><b>${money(x.total)}</b></td><td>${x.one}</td><td>${x.exact}</td><td>${x.full}</td></tr>`).join("")}</tbody></table></div></div>
- <div class="card"><h3>📅 Clasificación por jornada</h3>${state.rounds.filter(r=>r.status==="finished").reverse().map(r=>{const rr=state.scores.filter(s=>Number(s.round_id)===Number(r.id)).sort((a,b)=>b.prize-a.prize);return `<h4>${esc(r.name)}</h4><div class="tablewrap"><table class="table"><tbody>${rr.map((s,i)=>{const p=state.participants.find(x=>Number(x.id)===Number(s.participant_id));return `<tr><td>${i+1}</td><td>${esc(p?.team_name||p?.name||"")}</td><td>${s.correct_1x2}/6</td><td>${s.exact_scores}</td><td><b>${money(s.prize)}</b></td></tr>`}).join("")}</tbody></table></div>`}).join("")||`<p class="muted">Todavía no hay jornadas finalizadas.</p>`}</div>`
+ const roundsShown=[...state.rounds].filter(r=>r.status==="finished"||roundClosed(r)).sort((a,b)=>b.round_number-a.round_number);
+ return nav()+prizeSummary()+`<div class="card"><h2>🏆 Clasificación general</h2><div class="tablewrap"><table class="table"><thead><tr><th>#</th><th>Equipo</th><th>€</th><th>1X2</th><th>Exactos</th><th>6/6</th></tr></thead><tbody>${rows.map((x,i)=>`<tr class="${Number(x.id)===Number(state.participant?.id)?"me":""}"><td>${i+1}</td><td><b>${esc(x.team_name||x.name||"Equipo")}</b></td><td><b>${money(x.total)}</b></td><td>${x.one}</td><td>${x.exact}</td><td>${x.full}</td></tr>`).join("")}</tbody></table></div></div>
+ <div class="card"><h3>📅 Clasificación por jornada</h3>${roundsShown.map(r=>{const rr=state.scores.filter(s=>Number(s.round_id)===Number(r.id)).sort((a,b)=>b.prize-a.prize);const ms=roundMatches(r.id);return `<h4>${esc(r.name)} <span class="badge ${roundStatusClass(r)}">${esc(roundStatusLabel(r))}</span></h4>${rr.length?`<div class="tablewrap"><table class="table"><thead><tr><th>#</th><th>Equipo</th><th>1X2</th><th>Exactos</th><th>Premio</th></tr></thead><tbody>${rr.map((s,i)=>{const p=state.participants.find(x=>Number(x.id)===Number(s.participant_id));return `<tr><td>${i+1}</td><td>${esc(p?.team_name||p?.name||"")}</td><td>${s.correct_1x2}/6</td><td>${s.exact_scores}</td><td><b>${money(s.prize)}</b></td></tr>`}).join("")}</tbody></table></div>`:`<p class="muted small">Jornada en juego. La clasificación con aciertos y premios aparecerá cuando se registren los resultados.</p>`}${roundClosed(r)?`<details style="margin:10px 0"><summary style="cursor:pointer;font-weight:700">👀 Ver pronósticos de todos</summary>${sharedPredictionsHtml(r.id)}</details>`:""}`}).join("")||`<p class="muted">Todavía no hay jornadas cerradas.</p>`}</div>`
 }
 function history(){
  const me=state.scores.filter(s=>Number(s.participant_id)===Number(state.participant?.id)).sort((a,b)=>{const ra=state.rounds.find(r=>r.id===a.round_id),rb=state.rounds.find(r=>r.id===b.round_id);return (rb?.round_number||0)-(ra?.round_number||0)});
- return nav()+`<div class="card"><h2>📊 Historial de ${esc(state.participant?.team_name||"")}</h2><div class="tablewrap"><table class="table"><thead><tr><th>Jornada</th><th>1X2</th><th>Exactos</th><th>6/6</th><th>Premio</th></tr></thead><tbody>${me.map(s=>{const r=state.rounds.find(x=>Number(x.id)===Number(s.round_id));return `<tr><td>${esc(r?.name||"")}</td><td>${s.correct_1x2}/6</td><td>${s.exact_scores}</td><td>${s.full_bonus?"🏆":""}</td><td><b>${money(s.prize)}</b></td></tr>`}).join("")||`<tr><td colspan="5">Aún no hay jornadas puntuadas.</td></tr>`}</tbody></table></div></div>`
+ return nav()+prizeSummary()+`<div class="card"><h2>📊 Historial de ${esc(state.participant?.team_name||"")}</h2><div class="tablewrap"><table class="table"><thead><tr><th>Jornada</th><th>1X2</th><th>Exactos</th><th>6/6</th><th>Premio</th></tr></thead><tbody>${me.map(s=>{const r=state.rounds.find(x=>Number(x.id)===Number(s.round_id));return `<tr><td>${esc(r?.name||"")}</td><td>${s.correct_1x2}/6</td><td>${s.exact_scores}</td><td>${s.full_bonus?"🏆":""}</td><td><b>${money(s.prize)}</b></td></tr>`}).join("")||`<tr><td colspan="5">Aún no hay jornadas puntuadas.</td></tr>`}</tbody></table></div></div>`
 }
 function adminPage(){
  const rounds=[...state.rounds].sort((a,b)=>b.round_number-a.round_number);
  return nav()+`<div class="grid"><div class="card"><h2>⚙️ Nueva jornada</h2><div class="formgrid"><div><label>Nº jornada</label><input id="nr" type="number" min="1"></div><div><label>Nombre</label><input id="nn" placeholder="Jornada 1"></div><div><label>Cierre</label><input id="nc" type="datetime-local"></div></div><p class="small muted">Puedes dejar el cierre vacío: se calculará automáticamente como 1 hora antes del primer partido.</p><div id="newmatches">${adminMatchRows()}</div><div style="margin-top:12px"><button class="btn blue" onclick="importFile()">📥 Importar CSV/JSON</button> <input id="file" type="file" accept=".csv,.json" class="hidden" onchange="readImport(event)"></div><button class="btn primary" style="margin-top:12px" onclick="createRound()">💾 Crear jornada</button></div>
- <div class="card"><h2>📚 Jornadas</h2>${rounds.map(r=>`<div class="stat" style="margin-bottom:9px"><b>${esc(r.name)}</b><span class="badge ${r.status}">${r.status}</span><div class="small muted">Cierre ${dateFmt(r.closes_at)}</div><button class="btn" style="margin-top:8px" onclick="openAdminRound(${r.id})">Gestionar</button> <button class="btn blue" style="margin-top:8px" onclick="openAdminTracking(${r.id})">👥 Seguimiento</button> <button class="btn danger" style="margin-top:8px" onclick="deleteRound(${r.id})">🗑️ Eliminar</button></div>`).join("")||`<p class="muted">No hay jornadas.</p>`}</div></div>
+ <div class="card"><h2>📚 Jornadas</h2>${rounds.map(r=>`<div class="stat" style="margin-bottom:9px"><b>${esc(r.name)}</b><span class="badge ${roundStatusClass(r)}">${roundStatusLabel(r)}</span><div class="small muted">Cierre ${dateFmt(r.closes_at)}</div><button class="btn" style="margin-top:8px" onclick="openAdminRound(${r.id})">Gestionar</button> <button class="btn blue" style="margin-top:8px" onclick="openAdminTracking(${r.id})">👥 Seguimiento</button> <button class="btn danger" style="margin-top:8px" onclick="deleteRound(${r.id})">🗑️ Eliminar</button></div>`).join("")||`<p class="muted">No hay jornadas.</p>`}</div></div>
  ${state.adminRound?adminManage(state.adminRound):""}
  ${state.adminTrackingRound?adminTracking(state.adminTrackingRound):""}`
 }
@@ -297,7 +317,7 @@ async function deleteRound(rid){
 }
 function adminManage(rid){
  const r=state.rounds.find(x=>Number(x.id)===Number(rid)),ms=roundMatches(rid);if(!r)return "";
- return `<div class="card"><h2>🛠️ ${esc(r.name)}</h2><p><span class="badge ${r.status}">${r.status}</span> · cierre ${dateFmt(r.closes_at)}</p>
+ return `<div class="card"><h2>🛠️ ${esc(r.name)}</h2><p><span class="badge ${roundStatusClass(r)}">${roundStatusLabel(r)}</span> · cierre ${dateFmt(r.closes_at)}</p>
  ${ms.map(m=>`<div class="adminmatch"><b>${m.match_order}</b><div><label>${esc(m.home_team)}</label></div><div><label>${esc(m.away_team)}</label></div><div><label>Estado</label><select id="st_${m.id}"><option ${m.status==="scheduled"?"selected":""}>scheduled</option><option ${m.status==="finished"?"selected":""}>finished</option><option ${m.status==="postponed"?"selected":""}>postponed</option><option ${m.status==="cancelled"?"selected":""}>cancelled</option></select></div><div><label>Local</label><input id="rh_${m.id}" type="number" min="0" value="${m.home_goals??""}"></div><div><label>Visit.</label><input id="ra_${m.id}" type="number" min="0" value="${m.away_goals??""}"></div></div>`).join("")}
  <div style="margin-top:15px"><button class="btn green" onclick="saveResults(${r.id})">💾 Guardar resultados y calcular</button> ${r.status==="draft"?`<button class="btn primary" onclick="publishRound(${r.id})">🚀 Publicar jornada</button>`:""} ${r.status!=="finished"?`<button class="btn" onclick="finishRound(${r.id})">🏁 Marcar finalizada</button>`:""}</div></div>`
 }
@@ -317,16 +337,37 @@ async function saveResults(rid){
  const ms=roundMatches(rid);for(const m of ms){const h=$("rh_"+m.id).value,a=$("ra_"+m.id).value,st=$("st_"+m.id).value;if(h===""||a==="")continue;let q=await sb.from("quinielon_matches").update({home_goals:Number(h),away_goals:Number(a),status:st,result_source:"admin",result_confirmed_at:new Date().toISOString()}).eq("id",m.id);if(q.error){toast(q.error.message);return}}
  await calculate(rid);toast("Resultados guardados y puntuaciones recalculadas.");await load()
 }
+function computeRoundStats(rid){
+ const ms=roundMatches(rid),pred=state.predictions.filter(p=>ms.some(m=>Number(m.id)===Number(p.match_id))),settings=prizeSettings();
+ return state.participants.map(part=>{const pp=pred.filter(p=>Number(p.participant_id)===Number(part.id));let one=0,exact=0;
+  for(const m of ms){const p=pp.find(x=>Number(x.match_id)===Number(m.id));if(!p||m.home_goals==null||m.away_goals==null)continue;const real=resultOutcome(m.home_goals,m.away_goals);if(p.outcome===real)one++;if(Number(p.home_goals)===Number(m.home_goals)&&Number(p.away_goals)===Number(m.away_goals))exact++}
+  const full=one===6&&ms.length===6;return {participant_id:part.id,correct_1x2:one,exact_scores:exact,full_bonus:full,base_prize:one*settings.prize_1x2+exact*settings.prize_exact+(full?settings.prize_full:0),superjackpot:exact===6&&ms.length===6?settings.prize_superjackpot:0};
+ });
+}
+async function processJackpot(rid){
+ if(!state.season)throw new Error("No hay temporada activa.");
+ let existing=state.jackpotEvents.find(e=>Number(e.round_id)===Number(rid));
+ if(existing)return existing;
+ let st=await sb.from("quinielon_jackpot_state").select("*").eq("season_id",state.season.id).maybeSingle();if(st.error)throw st.error;
+ let balance=Number(st.data?.balance||0);const stats=computeRoundStats(rid);const winners=stats.filter(x=>x.full_bonus).map(x=>x.participant_id);const contribution=winners.length?0:100000;const jackpotAwards={};
+ if(winners.length){const each=Math.floor(balance/winners.length);let remainder=balance-each*winners.length;winners.forEach(id=>{jackpotAwards[String(id)]=each+(remainder>0?1:0);if(remainder>0)remainder--});balance=0}else balance+=contribution;
+ const event={season_id:state.season.id,round_id:Number(rid),pot_before:Number(st.data?.balance||0),contribution,pot_after:balance,jackpot_awards:jackpotAwards,jackpot_winners:winners,superjackpot_winners:stats.filter(x=>x.superjackpot>0).map(x=>x.participant_id),processed_at:new Date().toISOString()};
+ let ins=await sb.from("quinielon_jackpot_rounds").insert(event).select().single();if(ins.error){if(ins.error.code==="23505"){const again=await sb.from("quinielon_jackpot_rounds").select("*").eq("round_id",rid).single();if(again.error)throw again.error;return again.data}throw ins.error}
+ if(st.data){let upd=await sb.from("quinielon_jackpot_state").update({balance,updated_at:new Date().toISOString()}).eq("season_id",state.season.id);if(upd.error)throw upd.error}
+ else{let insState=await sb.from("quinielon_jackpot_state").insert({season_id:state.season.id,balance,updated_at:new Date().toISOString()});if(insState.error)throw insState.error}
+ state.jackpotState={...(st.data||{}),season_id:state.season.id,balance};state.jackpotEvents.push(ins.data);return ins.data;
+}
 async function calculate(rid){
- const ms=roundMatches(rid),pred=state.predictions.filter(p=>ms.some(m=>Number(m.id)===Number(p.match_id))),settings=state.settings||{prize_1x2:100000,prize_exact:250000,prize_full:1000000};
- for(const part of state.participants){
-   const pp=pred.filter(p=>Number(p.participant_id)===Number(part.id));let one=0,exact=0;
-   for(const m of ms){const p=pp.find(x=>Number(x.match_id)===Number(m.id));if(!p||m.home_goals==null)continue;const real=resultOutcome(m.home_goals,m.away_goals);if(p.outcome===real)one++;if(Number(p.home_goals)===Number(m.home_goals)&&Number(p.away_goals)===Number(m.away_goals))exact++}
-   const full=one===6,prize=one*Number(settings.prize_1x2)+exact*Number(settings.prize_exact)+(full?Number(settings.prize_full):0);
-   await sb.from("quinielon_scores").upsert({round_id:rid,participant_id:part.id,correct_1x2:one,exact_scores:exact,full_bonus:full,prize,calculated_at:new Date().toISOString()},{onConflict:"round_id,participant_id"})
+ const stats=computeRoundStats(rid),event=state.jackpotEvents.find(e=>Number(e.round_id)===Number(rid));
+ for(const x of stats){const jackpot=Number(event?.jackpot_awards?.[String(x.participant_id)]||0);const prize=x.base_prize+x.superjackpot+jackpot;
+  const q=await sb.from("quinielon_scores").upsert({round_id:rid,participant_id:x.participant_id,correct_1x2:x.correct_1x2,exact_scores:x.exact_scores,full_bonus:x.full_bonus,prize,calculated_at:new Date().toISOString()},{onConflict:"round_id,participant_id"});if(q.error)throw q.error;
  }
 }
-async function finishRound(rid){await calculate(rid);let q=await sb.from("quinielon_rounds").update({status:"finished"}).eq("id",rid);if(q.error){toast(q.error.message);return}toast("Jornada finalizada.");state.adminRound=rid;await load()}
+async function finishRound(rid){
+ if(!admin()){toast("Solo el administrador puede finalizar jornadas.");return}
+ const ms=roundMatches(rid);if(ms.length!==6||ms.some(m=>m.home_goals==null||m.away_goals==null)){toast("Antes de finalizar, introduce los resultados de los 6 partidos.");return}
+ try{await processJackpot(rid);await calculate(rid);let q=await sb.from("quinielon_rounds").update({status:"finished"}).eq("id",rid);if(q.error)throw q.error;toast("Jornada finalizada y premios calculados.");state.adminRound=rid;await load()}catch(e){toast("No se ha podido finalizar: "+(e.message||"error desconocido"))}
+}
 function render(){const app=$("app");if(!state.user){app.innerHTML=login();return}if(state.page==="home")app.innerHTML=home();else if(state.page==="ranking")app.innerHTML=ranking();else if(state.page==="history")app.innerHTML=history();else app.innerHTML=admin()?adminPage():home()}
 function go(p){state.page=p;state.adminRound=null;state.adminTrackingRound=null;render()}
 function openAdminRound(id){state.page="admin";state.adminRound=id;render()}
