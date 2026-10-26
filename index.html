@@ -280,12 +280,13 @@ async function savePredictions(rid){
  const {error}=await sb.from("quinielon_predictions").upsert(rows,{onConflict:"participant_id,match_id"});if(error){toast(error.message);return}toast("Pronósticos guardados.");await load()
 }
 function ranking(){
+ const current=([...state.rounds].filter(r=>r.status==="open").sort((a,b)=>new Date(a.first_match_at)-new Date(b.first_match_at))[0])||null;
  const rows=state.participants.map(p=>{const ss=state.scores.filter(s=>Number(s.participant_id)===Number(p.id));return {...p,total:ss.reduce((a,s)=>a+Number(s.prize||0),0),one:ss.reduce((a,s)=>a+Number(s.correct_1x2||0),0),exact:ss.reduce((a,s)=>a+Number(s.exact_scores||0),0),full:ss.filter(s=>s.full_bonus).length}}).sort((a,b)=>b.total-a.total);
  const roundsShown=[...state.rounds].filter(r=>r.status==="finished").sort((a,b)=>b.round_number-a.round_number);
- return nav()+`<div class="card"><h2>🏆 Clasificación general</h2><div class="tablewrap"><table class="table"><thead><tr><th>#</th><th>Equipo</th><th>€</th><th>1X2</th><th>Exactos</th><th>6/6</th></tr></thead><tbody>${rows.map((x,i)=>`<tr class="${Number(x.id)===Number(state.participant?.id)?"me":""}"><td>${i+1}</td><td><b>${esc(x.team_name||x.name||"Equipo")}</b></td><td><b>${money(x.total)}</b></td><td>${x.one}</td><td>${x.exact}</td><td>${x.full}</td></tr>`).join("")}</tbody></table></div></div>
- <div class="card"><h3>📅 Jornadas finalizadas</h3><p class="muted small">Abre cada jornada para consultar la clasificación y los pronósticos de todos los equipos. Los aciertos aparecen en verde y los fallos en rojo.</p>${roundsShown.map(r=>roundReviewHtml(r)).join("")||`<p class="muted">Todavía no hay jornadas finalizadas.</p>`}</div>`
+ return nav()+`${current?`<div class="card"><h2>⚽ Jornada en juego</h2><p class="muted small">Consulta la clasificación disponible y abre cada equipo para ver sus pronósticos de esta jornada.</p>${roundReviewHtml(current,true)}</div>`:""}<div class="card"><h2>🏆 Clasificación general</h2><div class="tablewrap"><table class="table"><thead><tr><th>#</th><th>Equipo</th><th>€</th><th>1X2</th><th>Exactos</th><th>6/6</th></tr></thead><tbody>${rows.map((x,i)=>`<tr class="${Number(x.id)===Number(state.participant?.id)?"me":""}"><td>${i+1}</td><td><b>${esc(x.team_name||x.name||"Equipo")}</b></td><td><b>${money(x.total)}</b></td><td>${x.one}</td><td>${x.exact}</td><td>${x.full}</td></tr>`).join("")}</tbody></table></div></div>
+ <div class="card"><h3>📅 Jornadas finalizadas</h3><p class="muted small">Abre cada jornada para consultar la clasificación y los pronósticos de todos los equipos. Los aciertos aparecen en verde y los fallos en rojo.</p>${roundsShown.map(r=>roundReviewHtml(r,false)).join("")||`<p class="muted">Todavía no hay jornadas finalizadas.</p>`}</div>`
 }
-function roundReviewHtml(r){
+function roundReviewHtml(r,isCurrent=false){
  const scores=state.scores.filter(s=>Number(s.round_id)===Number(r.id)).sort((a,b)=>Number(b.prize||0)-Number(a.prize||0));
  const ms=roundMatches(r.id);
  const rankingTable=`<h4 class="round-subtitle">🏆 Clasificación de ${esc(r.name)}</h4><div class="tablewrap"><table class="table"><thead><tr><th>#</th><th>Equipo</th><th>1X2</th><th>Exactos</th><th>Premio</th></tr></thead><tbody>${scores.map((s,i)=>{const p=state.participants.find(x=>Number(x.id)===Number(s.participant_id));return `<tr class="${Number(s.participant_id)===Number(state.participant?.id)?"me":""}"><td>${i+1}</td><td><b>${esc(p?.team_name||p?.name||"Equipo")}</b></td><td>${s.correct_1x2}/6</td><td>${s.exact_scores}</td><td><b>${money(s.prize)}</b></td></tr>`}).join("")||`<tr><td colspan="5">Todavía no hay puntuaciones calculadas.</td></tr>`}</tbody></table></div>`;
@@ -302,7 +303,7 @@ function roundReviewHtml(r){
   }).join("");
   return `<details class="prediction-review"><summary>${esc(p.team_name||p.name||"Equipo")} · ${n}/${ms.length} pronósticos</summary><div class="review-matches">${items||`<p class="muted small">No hay partidos en esta jornada.</p>`}</div></details>`;
  }).join("");
- return `<details class="round-accordion"><summary><span>${esc(r.name)}</span><span class="badge closed">FINALIZADA</span></summary><div class="round-content">${rankingTable}<h4 class="round-subtitle">🔎 Pronósticos por equipo</h4>${players}</div></details>`;
+ return `<details class="round-accordion" ${isCurrent?"open":""}><summary><span>${esc(r.name)}</span><span class="badge ${isCurrent?"open":"closed"}">${isCurrent?"EN JUEGO":"FINALIZADA"}</span></summary><div class="round-content">${rankingTable}<h4 class="round-subtitle">🔎 Pronósticos por equipo</h4>${players}</div></details>`;
 }
 function history(){
  const me=state.scores.filter(s=>Number(s.participant_id)===Number(state.participant?.id)).sort((a,b)=>{const ra=state.rounds.find(r=>r.id===a.round_id),rb=state.rounds.find(r=>r.id===b.round_id);return (rb?.round_number||0)-(ra?.round_number||0)});
@@ -405,7 +406,7 @@ async function finishRound(rid){
  const ms=roundMatches(rid);if(ms.length!==6||ms.some(m=>m.home_goals==null||m.away_goals==null)){toast("Antes de finalizar, introduce los resultados de los 6 partidos.");return}
  try{await processJackpot(rid);await calculate(rid);let q=await sb.from("quinielon_rounds").update({status:"finished"}).eq("id",rid);if(q.error)throw q.error;toast("Jornada finalizada y premios calculados.");state.adminRound=rid;await load()}catch(e){toast("No se ha podido finalizar: "+(e.message||"error desconocido"))}
 }
-function render(){const app=$("app");if(!state.user){app.innerHTML=login();return}if(state.page==="home")app.innerHTML=home();else if(state.page==="ranking")app.innerHTML=ranking();else if(state.page==="history")app.innerHTML=history();else app.innerHTML=admin()?adminPage():home()}
+function render(){const app=$("app");if(!state.user){app.innerHTML=login();return}if(state.page==="home")app.innerHTML=home();else if(state.page==="ranking")app.innerHTML=ranking();else if(state.page==="history")app.innerHTML=history();else if(state.page==="prizes")app.innerHTML=prizesPage();else app.innerHTML=admin()?adminPage():home()}
 function go(p){state.page=p;state.adminRound=null;state.adminTrackingRound=null;render()}
 function openAdminRound(id){state.page="admin";state.adminRound=id;render()}
 sb.auth.onAuthStateChange((event)=>{if(event==="SIGNED_IN")load().catch(e=>toast(e.message))});
