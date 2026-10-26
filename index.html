@@ -156,6 +156,20 @@ body:before{opacity:.13}
 }
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
 
+
+.round-accordion{border:1px solid #29465f;border-radius:13px;background:#071827;margin:10px 0;overflow:hidden}
+.round-accordion>summary{list-style:none;cursor:pointer;padding:15px;display:flex;align-items:center;justify-content:space-between;gap:10px;font-weight:800;background:linear-gradient(100deg,#102b43,#0a1c2d)}
+.round-accordion>summary::-webkit-details-marker{display:none}.round-accordion>summary:after{content:'＋';color:#70baff;font-size:20px}.round-accordion[open]>summary:after{content:'−'}
+.round-content{padding:12px}.round-subtitle{margin:16px 0 8px;font-size:16px}
+.prediction-review{border:1px solid #29465f;border-radius:12px;margin:10px 0;overflow:hidden}
+.prediction-review>summary{padding:12px;background:#102438;cursor:pointer;font-weight:750;list-style:none}
+.prediction-review>summary::-webkit-details-marker{display:none}.review-matches{padding:8px 10px}
+.review-match{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:9px;align-items:center;padding:10px 0;border-bottom:1px solid #20394f;font-size:13px}
+.review-match:last-child{border-bottom:0}.review-team{font-weight:700}
+.review-chip{display:inline-block;padding:5px 7px;border-radius:7px;font-weight:800;white-space:nowrap}
+.review-chip.hit{background:#103c28;color:#58f09b;border:1px solid #1e7546}.review-chip.miss{background:#421c26;color:#ff9cac;border:1px solid #803244}.review-chip.pending{background:#302b1d;color:#ffd36b;border:1px solid #625126}
+@media(max-width:600px){.round-accordion>summary{padding:13px;font-size:14px}.round-content{padding:9px}.review-match{grid-template-columns:1fr auto;gap:6px}.review-chip{font-size:11px}}
+
 </style>
 </head>
 <body>
@@ -222,7 +236,7 @@ function nav(){
  return `<nav class="tabs" aria-label="Navegación principal">
  <button class="tab ${state.page==="home"?"active":""}" onclick="go('home')">⚽ Jornada</button>
  <button class="tab ${state.page==="ranking"?"active":""}" onclick="go('ranking')">🏆 Clasificación</button>
- <button class="tab ${state.page==="history"?"active":""}" onclick="go('history')">📊 Historial</button>
+ <button class="tab ${state.page==="history"?"active":""}" onclick="go('history')">📊 Historial</button>\n <button class="tab ${state.page==="prizes"?"active":""}" onclick="go('prizes')">💰 Premios</button>
  ${admin()?`<button class="tab ${state.page==="admin"?"active":""}" onclick="go('admin')">⚙️ Admin</button>`:""}
  <button class="tab" onclick="logout()">↪ Salir</button>
  </nav>`
@@ -240,11 +254,14 @@ async function loginUser(){const team=$("team").value,pass=$("pass").value;$("lo
 async function loginAdmin(){const email=$("adminemail").value.trim(),password=$("adminpass").value;$("adminerr").textContent="";if(!email||!password){$("adminerr").textContent="Introduce el correo y la contraseña de administrador.";return}const {error}=await sb.auth.signInWithPassword({email,password});if(error){$("adminerr").textContent="No se ha podido iniciar sesión. Comprueba el correo y la contraseña.";return}try{await load();if(!admin()){await sb.auth.signOut();state.user=null;state.profile=null;render();const e=$("adminerr");if(e)e.textContent="Esta cuenta no tiene permisos de administrador."}}catch(e){await sb.auth.signOut();const el=$("adminerr");if(el)el.textContent=e.message}}
 async function logout(){await sb.auth.signOut();location.reload()}
 function home(){
- const r=currentRound();if(!r)return nav()+`<div class="card home-hero"><span class="badge draft">PRÓXIMAMENTE</span><h2>Prepara los pronósticos</h2><p class="muted">El administrador publicará la próxima jornada en breve.</p></div>${prizeSummary()}`;
+ const r=currentRound();
+ if(!r)return nav()+`<div class="card home-hero"><span class="badge draft">PRÓXIMAMENTE</span><h2>Prepara los pronósticos</h2><p class="muted">El administrador publicará la próxima jornada en breve.</p></div>`;
  const ms=roundMatches(r.id),s=scoreRound(r.id),closed=new Date(r.closes_at)<=new Date(),predCount=ms.filter(m=>!!predFor(m.id)).length;
  return nav()+`<section class="card home-hero"><div class="home-hero-top"><div><span class="badge ${closed?"closed":"open"}">${closed?"🔒 CERRADA":"● JORNADA ABIERTA"}</span><h2>${esc(r.name)}</h2><div class="home-subtitle">${ms.length} partidos · Cierre ${dateFmt(r.closes_at)}</div></div>${s?`<div class="home-prize"><div><span class="small muted">Premio de la jornada</span><b>${money(s.prize)}</b></div><span class="badge open">Calculado</span></div>`:`<div class="home-prize"><div><span class="small muted">Tu premio actual</span><b>— €</b></div><span class="small muted">Aún por calcular</span></div>`}</div><div class="home-metrics"><div class="home-metric"><strong>${predCount}/${ms.length}</strong><span>Pronósticos guardados</span></div><div class="home-metric"><strong>${s?`${s.correct_1x2}/6`:`—/6`}</strong><span>Aciertos 1X2</span></div><div class="home-metric"><strong>${s?`${s.exact_scores}`:"—"}</strong><span>Marcadores exactos</span></div></div></section>
- <section class="card prediction-card"><div class="prediction-heading"><h3>🎯 Tus pronósticos</h3><span class="badge">${ms.length} PARTIDOS</span></div><p class="muted small" style="margin:0 0 8px">Elige 1, X o 2 y añade el marcador exacto. Recuerda guardar antes del cierre.</p>${ms.map(matchHtml).join("")}<div class="save-bar">${closed?`<div class="muted small center">🔒 Los pronósticos están cerrados.</div>`:`<button class="btn primary" onclick="savePredictions(${r.id})">💾 Guardar mis pronósticos</button>`}</div></section>${closed?sharedPredictionsHtml(r.id):""}${prizeSummary()}`
+ <section class="card prediction-card"><div class="prediction-heading"><h3>🎯 Tus pronósticos</h3><span class="badge">${ms.length} PARTIDOS</span></div><p class="muted small" style="margin:0 0 8px">Elige 1, X o 2 y añade el marcador exacto. Recuerda guardar antes del cierre.</p>${ms.map(matchHtml).join("")}<div class="save-bar">${closed?`<div class="muted small center">🔒 Los pronósticos están cerrados.</div>`:`<button class="btn primary" onclick="savePredictions(${r.id})">💾 Guardar mis pronósticos</button>`}</div></section>${closed?sharedPredictionsHtml(r.id):""}`
 }
+function prizesPage(){return nav()+prizeSummary()}
+
 function sharedPredictionsHtml(rid){
  const r=state.rounds.find(x=>Number(x.id)===Number(rid));if(!r||!roundClosed(r))return "";
  const ms=roundMatches(rid);const participants=state.participants.filter(p=>Number(p.id)!==Number(state.participant?.id));
@@ -264,14 +281,34 @@ async function savePredictions(rid){
 }
 function ranking(){
  const rows=state.participants.map(p=>{const ss=state.scores.filter(s=>Number(s.participant_id)===Number(p.id));return {...p,total:ss.reduce((a,s)=>a+Number(s.prize||0),0),one:ss.reduce((a,s)=>a+Number(s.correct_1x2||0),0),exact:ss.reduce((a,s)=>a+Number(s.exact_scores||0),0),full:ss.filter(s=>s.full_bonus).length}}).sort((a,b)=>b.total-a.total);
- const roundsShown=[...state.rounds].filter(r=>r.status==="finished"||roundClosed(r)).sort((a,b)=>b.round_number-a.round_number);
- return nav()+prizeSummary()+`<div class="card"><h2>🏆 Clasificación general</h2><div class="tablewrap"><table class="table"><thead><tr><th>#</th><th>Equipo</th><th>€</th><th>1X2</th><th>Exactos</th><th>6/6</th></tr></thead><tbody>${rows.map((x,i)=>`<tr class="${Number(x.id)===Number(state.participant?.id)?"me":""}"><td>${i+1}</td><td><b>${esc(x.team_name||x.name||"Equipo")}</b></td><td><b>${money(x.total)}</b></td><td>${x.one}</td><td>${x.exact}</td><td>${x.full}</td></tr>`).join("")}</tbody></table></div></div>
- <div class="card"><h3>📅 Clasificación por jornada</h3>${roundsShown.map(r=>{const rr=state.scores.filter(s=>Number(s.round_id)===Number(r.id)).sort((a,b)=>b.prize-a.prize);const ms=roundMatches(r.id);return `<h4>${esc(r.name)} <span class="badge ${roundStatusClass(r)}">${esc(roundStatusLabel(r))}</span></h4>${rr.length?`<div class="tablewrap"><table class="table"><thead><tr><th>#</th><th>Equipo</th><th>1X2</th><th>Exactos</th><th>Premio</th></tr></thead><tbody>${rr.map((s,i)=>{const p=state.participants.find(x=>Number(x.id)===Number(s.participant_id));return `<tr><td>${i+1}</td><td>${esc(p?.team_name||p?.name||"")}</td><td>${s.correct_1x2}/6</td><td>${s.exact_scores}</td><td><b>${money(s.prize)}</b></td></tr>`}).join("")}</tbody></table></div>`:`<p class="muted small">Jornada en juego. La clasificación con aciertos y premios aparecerá cuando se registren los resultados.</p>`}${roundClosed(r)?`<details style="margin:10px 0"><summary style="cursor:pointer;font-weight:700">👀 Ver pronósticos de todos</summary>${sharedPredictionsHtml(r.id)}</details>`:""}`}).join("")||`<p class="muted">Todavía no hay jornadas cerradas.</p>`}</div>`
+ const roundsShown=[...state.rounds].filter(r=>r.status==="finished").sort((a,b)=>b.round_number-a.round_number);
+ return nav()+`<div class="card"><h2>🏆 Clasificación general</h2><div class="tablewrap"><table class="table"><thead><tr><th>#</th><th>Equipo</th><th>€</th><th>1X2</th><th>Exactos</th><th>6/6</th></tr></thead><tbody>${rows.map((x,i)=>`<tr class="${Number(x.id)===Number(state.participant?.id)?"me":""}"><td>${i+1}</td><td><b>${esc(x.team_name||x.name||"Equipo")}</b></td><td><b>${money(x.total)}</b></td><td>${x.one}</td><td>${x.exact}</td><td>${x.full}</td></tr>`).join("")}</tbody></table></div></div>
+ <div class="card"><h3>📅 Jornadas finalizadas</h3><p class="muted small">Abre cada jornada para consultar la clasificación y los pronósticos de todos los equipos. Los aciertos aparecen en verde y los fallos en rojo.</p>${roundsShown.map(r=>roundReviewHtml(r)).join("")||`<p class="muted">Todavía no hay jornadas finalizadas.</p>`}</div>`
+}
+function roundReviewHtml(r){
+ const scores=state.scores.filter(s=>Number(s.round_id)===Number(r.id)).sort((a,b)=>Number(b.prize||0)-Number(a.prize||0));
+ const ms=roundMatches(r.id);
+ const rankingTable=`<h4 class="round-subtitle">🏆 Clasificación de ${esc(r.name)}</h4><div class="tablewrap"><table class="table"><thead><tr><th>#</th><th>Equipo</th><th>1X2</th><th>Exactos</th><th>Premio</th></tr></thead><tbody>${scores.map((s,i)=>{const p=state.participants.find(x=>Number(x.id)===Number(s.participant_id));return `<tr class="${Number(s.participant_id)===Number(state.participant?.id)?"me":""}"><td>${i+1}</td><td><b>${esc(p?.team_name||p?.name||"Equipo")}</b></td><td>${s.correct_1x2}/6</td><td>${s.exact_scores}</td><td><b>${money(s.prize)}</b></td></tr>`}).join("")||`<tr><td colspan="5">Todavía no hay puntuaciones calculadas.</td></tr>`}</tbody></table></div>`;
+ const players=state.participants.map(p=>{
+  const n=ms.filter(m=>state.predictions.some(pr=>Number(pr.participant_id)===Number(p.id)&&Number(pr.match_id)===Number(m.id))).length;
+  const items=ms.map(m=>{
+   const pr=state.predictions.find(x=>Number(x.participant_id)===Number(p.id)&&Number(x.match_id)===Number(m.id));
+   const hasResult=m.home_goals!==null&&m.home_goals!==undefined&&m.away_goals!==null&&m.away_goals!==undefined;
+   const actual=hasResult?resultOutcome(m.home_goals,m.away_goals):null;
+   const oneHit=!!pr&&hasResult&&pr.outcome===actual;
+   const exactHit=!!pr&&hasResult&&Number(pr.home_goals)===Number(m.home_goals)&&Number(pr.away_goals)===Number(m.away_goals);
+   const predScore=pr?`${pr.home_goals??"–"}-${pr.away_goals??"–"}`:"Sin pronóstico";
+   return `<div class="review-match"><div><div class="review-team">${esc(m.home_team)} – ${esc(m.away_team)}</div><div class="small muted">Real: ${hasResult?`${m.home_goals}-${m.away_goals}`:"Pendiente"} · Pronóstico: ${esc(predScore)}</div></div><span class="review-chip ${!hasResult?"pending":oneHit?"hit":"miss"}">1X2 ${!hasResult?"—":oneHit?"✓":"✗"}</span><span class="review-chip ${!hasResult?"pending":exactHit?"hit":"miss"}">Exacto ${!hasResult?"—":exactHit?"✓":"✗"}</span></div>`;
+  }).join("");
+  return `<details class="prediction-review"><summary>${esc(p.team_name||p.name||"Equipo")} · ${n}/${ms.length} pronósticos</summary><div class="review-matches">${items||`<p class="muted small">No hay partidos en esta jornada.</p>`}</div></details>`;
+ }).join("");
+ return `<details class="round-accordion"><summary><span>${esc(r.name)}</span><span class="badge closed">FINALIZADA</span></summary><div class="round-content">${rankingTable}<h4 class="round-subtitle">🔎 Pronósticos por equipo</h4>${players}</div></details>`;
 }
 function history(){
  const me=state.scores.filter(s=>Number(s.participant_id)===Number(state.participant?.id)).sort((a,b)=>{const ra=state.rounds.find(r=>r.id===a.round_id),rb=state.rounds.find(r=>r.id===b.round_id);return (rb?.round_number||0)-(ra?.round_number||0)});
- return nav()+prizeSummary()+`<div class="card"><h2>📊 Historial de ${esc(state.participant?.team_name||"")}</h2><div class="tablewrap"><table class="table"><thead><tr><th>Jornada</th><th>1X2</th><th>Exactos</th><th>6/6</th><th>Premio</th></tr></thead><tbody>${me.map(s=>{const r=state.rounds.find(x=>Number(x.id)===Number(s.round_id));return `<tr><td>${esc(r?.name||"")}</td><td>${s.correct_1x2}/6</td><td>${s.exact_scores}</td><td>${s.full_bonus?"🏆":""}</td><td><b>${money(s.prize)}</b></td></tr>`}).join("")||`<tr><td colspan="5">Aún no hay jornadas puntuadas.</td></tr>`}</tbody></table></div></div>`
+ return nav()+`<div class="card"><h2>📊 Historial de ${esc(state.participant?.team_name||"")}</h2><div class="tablewrap"><table class="table"><thead><tr><th>Jornada</th><th>1X2</th><th>Exactos</th><th>6/6</th><th>Premio</th></tr></thead><tbody>${me.map(s=>{const r=state.rounds.find(x=>Number(x.id)===Number(s.round_id));return `<tr><td>${esc(r?.name||"")}</td><td>${s.correct_1x2}/6</td><td>${s.exact_scores}</td><td>${s.full_bonus?"🏆":""}</td><td><b>${money(s.prize)}</b></td></tr>`}).join("")||`<tr><td colspan="5">Aún no hay jornadas puntuadas.</td></tr>`}</tbody></table></div></div>`
 }
+
 function adminPage(){
  const rounds=[...state.rounds].sort((a,b)=>b.round_number-a.round_number);
  return nav()+`<div class="grid"><div class="card"><h2>⚙️ Nueva jornada</h2><div class="formgrid"><div><label>Nº jornada</label><input id="nr" type="number" min="1"></div><div><label>Nombre</label><input id="nn" placeholder="Jornada 1"></div><div><label>Cierre</label><input id="nc" type="datetime-local"></div></div><p class="small muted">Puedes dejar el cierre vacío: se calculará automáticamente como 1 hora antes del primer partido.</p><div id="newmatches">${adminMatchRows()}</div><div style="margin-top:12px"><button class="btn blue" onclick="importFile()">📥 Importar CSV/JSON</button> <input id="file" type="file" accept=".csv,.json" class="hidden" onchange="readImport(event)"></div><button class="btn primary" style="margin-top:12px" onclick="createRound()">💾 Crear jornada</button></div>
